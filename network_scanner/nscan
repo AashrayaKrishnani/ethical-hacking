@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+
+import argparse  # Successor of optparse
+
+import scapy.all as scapy
+
+
+# --- Too easy code
+
+# def scan(ip):
+#     scapy.arping(ip)
+#
+#
+# scan("192.168.0.1/24")
+
+# --- Some Good Quality Code Down below!
+
+
+def scan(ip, timeout=3):
+    # Type Casting 'timeout' var from String to float.
+    try:
+        timeout = float(timeout)
+        if timeout < 1:
+            timeout = 3
+    except ValueError:
+        print("[-] Invalid SECONDS/timeout Value entered.")
+        exit(0)
+
+    #     scapy.ls(scapy.ARP())
+    #     scapy.ls() is used to list arguments that can be passed in the Class which is passed in it as argument.
+    #     scapy.ls(scapy.ARP())  tells what arguments are accepted by scapy.ARP()
+
+    # scapy.ARP() is a class that allows us to send ARP requests ;)
+
+    try:    # Catching error due to Invalid IP.
+        arp_request = scapy.ARP(pdst=ip)  # pdst is variable that stores value of ip address to be broadcast.
+    except scapy.socket.gaierror:
+        print("[-] Invalid IP.")
+        exit(0)
+
+    # print("[+] arp_request.summary() \n" + arp_request.summary())
+    #
+    # print("[+] Calling arp_request.show()")
+    # arp_request.show()  # show() method lists details of the type of packet it is called from ;D
+
+    # scapy.Ether() is a class that allows us to create an Ethernet frame where we actually broadcast the ARP Req.
+    # It sends The ARP Req to all MAC ADDRESSES so that they can receive it and send their response! :D
+    broadcast = scapy.Ether()
+    #    scapy.ls(scapy.Ether())
+    broadcast.dst = 'ff:ff:ff:ff:ff:ff'  # dst = Destination MAC, It figures our MAC as src on its own ;p
+    # Above MAC is actually a NULL MAC which means it'll be broadcast to all devices. :D
+
+    # print("[+] broadcast.summary() \n" + broadcast.summary())
+    #
+    # print("[+] Calling broadcast.show()")
+    # broadcast.show()  # show() method lists details of the type of packet it is called from ;D
+
+    # Combining arp_request (ARP packet) and broadcast (MAC Address Packet) into one :D
+    arp_request_broadcast = broadcast / arp_request  # '/' Here is used to combine two packets as scapy ALLOWS it XD
+
+    # print("[+} arp_request_broadcast.summary() \n" + arp_request_broadcast.summary())
+    #
+    # print("[+] Calling arp_request_broadcast.show()")
+    # arp_request_broadcast.show()  # show() method lists details of the type of packet it is called from ;D
+
+    #  Onto Sending and Receiving Packets ;D
+    # (answered_list, unanswered_list) = scapy.srp(arp_request_broadcast, timeout=1)
+    # scapy.srp() returns two lists - answered_list and unanswered_list
+
+    # Modifying stuff to only receive answered list cos we don't need unanswered list.
+    answered_list = scapy.srp(arp_request_broadcast, timeout=timeout, verbose=False)[0]
+    # verbose=False removes unnecessary Console Output.
+    # [0] here specifies that we need only FIRST Element and not the second returning element of the function
+
+    # print("[+] answered_list.summary()")
+    # print(answered_list.summary())
+
+    # print("[+] unanswered_list.summary()")
+    # print(unanswered_list.summary())
+
+    # -- Using for-each loop in python
+
+    # Proper Printing Statement To Print A Table!
+    # print("IP\t\t\tMAC Address\n-----------------------------------------")
+
+    clients_list = []  # A List of dictionaries of clients(IP) along with their MAC Addresses
+
+    for element in answered_list:
+        # print(element, "\n")   # To print the raw element which is a couple of (request, response)
+        # print(element[0], "\n")  # Prints RAW Request sent in the particular packet, i.e., element
+        # print(element[1], "\n")  # Prints RAW Response received for the particular packet, i.e., element
+        # print(element[1].show(), "\n")  # Prints parsed Response with apt fields and corresponding values.
+
+        # print(element[1].psrc)  # Prints IP of device giving the Response.
+        # print(element[1].hwsrc)  # Prints MAC Address (hardware/hw src) of device giving the Response.
+
+        # print(element[1].psrc + "\t\t" + element[1].hwsrc)  # Proper Printing Statement To Print A Table!
+
+        # Creating A Dictionary(Sort of HashMap) of two elements.
+        # Keys = "ip" for element[1].psrc (current_ip), and "mac" for element[1].hwsrc (current_mac)
+        client_dict = {"ip": element[1].psrc, "mac": element[1].hwsrc}
+
+        clients_list.append(client_dict)  # Adding this entry of dictionary to the client list
+
+    # print(clients_list)  # Prints List of Dictionary of clients along wit their IP and MAC.
+
+    return clients_list  # Returning list of dictionaries containing IP and MAC of clients that Answered ARP req.
+
+
+def print_scan_result(result_list):
+    if not result_list:
+        print("[-] No Clients Found.\n")
+        return
+
+    print("IP\t\t\t  MAC Address\n-----------------------------------------")
+
+    for client in result_list:  # Iterating through the list of dictionaries of clients with IPs and MACs
+
+        print(client["ip"] + "\t\t" + client["mac"])  # Printing each client's IP and MAC suitably.
+
+    print("\n")
+
+
+def get_args():
+    # Object Initialization of argparse
+    parser = argparse.ArgumentParser()
+
+    # Adding argument options
+    parser.add_argument("-t", "--target", dest="target", help="Target Range To Scan.")
+    parser.add_argument("-s", "--seconds", dest="seconds", help="Seconds to wait for Responses; Timeout value")
+    # parser.parse_args() is used to parse the entered values.
+
+    # It returns ONLY ONE result, options chosen by the user.
+    # Saved under STRING variables named as we chose above as 'dest' for them,
+    user_input = parser.parse_args()
+
+    if not user_input.target:
+        print("[-] Kindly Re-Run Using -t or --target and specify IP range to scan.")
+        exit(0)
+
+    return user_input
+
+
+# Calling get_args() to take command line values using optparse.OptionParser() :)
+options = get_args()
+
+try:
+    scapy.srp(scapy.Ether(), verbose=False, timeout=0.5)
+    print("\n[+] Starting Scanning in Range = " + options.target + "\n")
+    scan_result = scan(options.target, options.seconds) if options.seconds else scan(options.target)
+except PermissionError:
+    print("\n[-] Kindly re-run with root privileges.\n")
+    exit(0)
+print("[*] Scanned Successfully. \n[+] Results :- \n")
+print_scan_result(scan_result)

